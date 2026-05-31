@@ -1,0 +1,10 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch>=2.2.0
+faster-whisper>=1.1.0
+nemo-toolkit[asr]>=2.0.0
+librosa>=0.11.0
+soundfile>=0.13.1
+omegaconf>=2.3.0
+pyqt6>=6.4.0
+huggingface-hub>=0.26.0

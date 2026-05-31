@@ -1,5 +1,12 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import Dict, List
+
+
+def default_speaker_name(speaker: str) -> str:
+    try:
+        return f"Спикер {int(speaker.split('_')[-1]) + 1}"
+    except ValueError:
+        return speaker
 
 
 @dataclass
@@ -24,12 +31,8 @@ class Segment:
     text: str
 
     def to_dict(self) -> dict:
-        return {
-            "start": round(self.start, 2),
-            "end": round(self.end, 2),
-            "speaker": self.speaker,
-            "text": self.text.strip(),
-        }
+        return {"start": round(self.start, 2), "end": round(self.end, 2),
+                "speaker": self.speaker, "text": self.text.strip()}
 
 
 @dataclass
@@ -39,21 +42,9 @@ class Result:
     speakers: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        speakers = self.speakers or {s.speaker: _default_name(s.speaker) for s in self.segments}
-        seen: Dict[str, str] = {}
+        names: Dict[str, str] = {}
         for s in self.segments:
-            if s.speaker not in seen:
-                seen[s.speaker] = speakers.get(s.speaker, _default_name(s.speaker))
-        return {
-            "language": self.language,
-            "speakers": seen,
-            "segments": [s.to_dict() for s in self.segments],
-        }
-
-
-def _default_name(speaker: str) -> str:
-    try:
-        n = int(speaker.split("_")[-1]) + 1
-        return f"Спикер {n}"
-    except ValueError:
-        return speaker
+            if s.speaker not in names:
+                names[s.speaker] = self.speakers.get(s.speaker) or default_speaker_name(s.speaker)
+        return {"language": self.language, "speakers": names,
+                "segments": [s.to_dict() for s in self.segments]}

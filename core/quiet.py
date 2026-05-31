@@ -1,22 +1,22 @@
+import contextlib
+import logging
 import os
 import sys
-import logging
 import warnings
-import contextlib
 
-os.environ["NEMO_TESTING"] = "0"
-os.environ["HYDRA_FULL_ERROR"] = "0"
-os.environ["TRANSFORMERS_VERBOSITY"] = "error"
-os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
-os.environ["PYTHONWARNINGS"] = "ignore"
-os.environ["TQDM_DISABLE"] = "1"
-os.environ["ONE_LOGGER_DISABLED"] = "1"
+for k, v in {
+    "NEMO_TESTING": "0", "HYDRA_FULL_ERROR": "0",
+    "TRANSFORMERS_VERBOSITY": "error", "TRANSFORMERS_NO_ADVISORY_WARNINGS": "1",
+    "PYTHONWARNINGS": "ignore", "TQDM_DISABLE": "1", "ONE_LOGGER_DISABLED": "1",
+}.items():
+    os.environ[k] = v
 
 warnings.filterwarnings("ignore")
 
 for name in ("nemo", "nemo_logger", "NeMo", "pytorch_lightning", "lightning"):
-    logging.getLogger(name).setLevel(logging.CRITICAL)
-    logging.getLogger(name).propagate = False
+    log = logging.getLogger(name)
+    log.setLevel(logging.CRITICAL)
+    log.propagate = False
 
 
 @contextlib.contextmanager
@@ -36,17 +36,3 @@ def muted():
         os.dup2(err, 2)
         for fd in (out, err, null):
             os.close(fd)
-
-
-def silence_nemo() -> None:
-    try:
-        from nemo.utils import logging as nemo_logging
-        nemo_logging.setLevel(logging.CRITICAL)
-    except Exception:
-        pass
-    try:
-        from pytorch_lightning.utilities import rank_zero
-        rank_zero.rank_zero_info = lambda *a, **k: None
-        rank_zero.rank_zero_warn = lambda *a, **k: None
-    except Exception:
-        pass

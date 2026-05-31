@@ -1,18 +1,16 @@
-import os
 import json
+import os
 import tempfile
 import wave
 from typing import List
-from core.quiet import muted, silence_nemo
+
 from omegaconf import OmegaConf
+
+from core.models import Turn
+from core.quiet import muted
 
 with muted():
     from nemo.collections.asr.models import ClusteringDiarizer
-
-from interfaces.base import IDiarizer
-from core.models import Turn
-
-silence_nemo()
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 MODEL_DIR = os.path.join(ROOT, "models", "nemo")
@@ -21,25 +19,17 @@ VAD_MODEL = os.path.join(MODEL_DIR, "vad_multilingual_marblenet.nemo")
 SPK_MODEL = os.path.join(MODEL_DIR, "titanet_large.nemo")
 
 LEVELS = {
-    "easy": {
-        "windows": [1.5],
-        "shifts": [1.0],
-        "weights": [1],
-    },
-    "medium": {
-        "windows": [1.5, 1.25, 1.0, 0.75, 0.5],
-        "shifts": [0.75, 0.625, 0.5, 0.375, 0.25],
-        "weights": [1, 1, 1, 1, 1],
-    },
-    "hard": {
-        "windows": [2.0, 1.5, 1.25, 1.0, 0.75, 0.5],
-        "shifts": [0.5, 0.375, 0.3125, 0.25, 0.1875, 0.125],
-        "weights": [1, 1, 1, 1, 1, 1],
-    },
+    "easy":   {"windows": [1.5], "shifts": [1.0], "weights": [1]},
+    "medium": {"windows": [1.5, 1.25, 1.0, 0.75, 0.5],
+               "shifts":  [0.75, 0.625, 0.5, 0.375, 0.25],
+               "weights": [1, 1, 1, 1, 1]},
+    "hard":   {"windows": [2.0, 1.5, 1.25, 1.0, 0.75, 0.5],
+               "shifts":  [0.5, 0.375, 0.3125, 0.25, 0.1875, 0.125],
+               "weights": [1, 1, 1, 1, 1, 1]},
 }
 
 
-class NeMoDiarizer(IDiarizer):
+class NeMoDiarizer:
     def __init__(self, device: str = "cpu", level: str = "medium"):
         self.device = device
         self.level = level if level in LEVELS else "medium"
@@ -51,16 +41,11 @@ class NeMoDiarizer(IDiarizer):
         with tempfile.TemporaryDirectory() as tmp:
             manifest = os.path.join(tmp, "manifest.json")
             with open(manifest, "w") as f:
-                f.write(json.dumps({
-                    "audio_filepath": path,
-                    "offset": 0,
-                    "duration": duration,
-                    "label": "infer",
-                    "text": "-",
-                    "num_speakers": None,
-                    "rttm_filepath": None,
-                    "uem_filepath": None,
-                }))
+                json.dump({
+                    "audio_filepath": path, "offset": 0, "duration": duration,
+                    "label": "infer", "text": "-", "num_speakers": None,
+                    "rttm_filepath": None, "uem_filepath": None,
+                }, f)
 
             preset = LEVELS[self.level]
             cfg = OmegaConf.load(CONFIG_PATH)
@@ -80,17 +65,15 @@ class NeMoDiarizer(IDiarizer):
                 ClusteringDiarizer(cfg=cfg).diarize()
 
             name = os.path.splitext(os.path.basename(path))[0]
-            rttm = os.path.join(tmp, "pred_rttms", name + ".rttm")
-            return self._parse_rttm(rttm)
+            return _parse_rttm(os.path.join(tmp, "pred_rttms", name + ".rttm"))
 
-    @staticmethod
-    def _parse_rttm(path: str) -> List[Turn]:
-        turns: List[Turn] = []
-        with open(path) as f:
-            for line in f:
-                p = line.split()
-                if len(p) < 8 or p[0] != "SPEAKER":
-                    continue
+
+def _parse_rttm(path: str) -> List[Turn]:
+    turns: List[Turn] = []
+    with open(path) as f:
+        for line in f:
+            p = line.split()
+            if len(p) >= 8 and p[0] == "SPEAKER":
                 start, dur = float(p[3]), float(p[4])
                 turns.append(Turn(start, start + dur, p[7]))
-        return sorted(turns, key=lambda t: t.start)
+    return sorted(turns, key=lambda t: t.start)

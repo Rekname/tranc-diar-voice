@@ -1,32 +1,34 @@
 import os
 import tempfile
+from typing import List
+
 import librosa
 import soundfile as sf
-from interfaces.base import ITranscriber, IDiarizer
-from core.models import Word, Turn, Segment, Result
+
 from core.log import stage
+from core.models import Result, Segment, Turn, Word
 
 
-def _to_wav16k(path: str, dst: str) -> str:
-    audio, _ = librosa.load(path, sr=16000, mono=True)
+def _to_wav16k(src: str, dst: str) -> str:
+    audio, _ = librosa.load(src, sr=16000, mono=True)
     sf.write(dst, audio, 16000, subtype="PCM_16")
     return dst
 
 
-def _speaker_of(word: Word, turns: list[Turn]) -> str:
+def _speaker_of(word: Word, turns: List[Turn]) -> str:
     mid = (word.start + word.end) / 2
-    best, best_dist = None, float("inf")
+    best, best_dist = "speaker_0", float("inf")
     for t in turns:
         if t.start <= mid <= t.end:
             return t.speaker
         dist = min(abs(mid - t.start), abs(mid - t.end))
         if dist < best_dist:
             best, best_dist = t.speaker, dist
-    return best or "speaker_0"
+    return best
 
 
-def _merge(words: list[Word], turns: list[Turn]) -> list[Segment]:
-    segments: list[Segment] = []
+def _merge(words: List[Word], turns: List[Turn]) -> List[Segment]:
+    segments: List[Segment] = []
     for w in words:
         spk = _speaker_of(w, turns)
         if segments and segments[-1].speaker == spk:
@@ -38,7 +40,7 @@ def _merge(words: list[Word], turns: list[Turn]) -> list[Segment]:
 
 
 class Pipeline:
-    def __init__(self, transcriber: ITranscriber, diarizer: IDiarizer):
+    def __init__(self, transcriber, diarizer):
         self.transcriber = transcriber
         self.diarizer = diarizer
 

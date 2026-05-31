@@ -1,34 +1,38 @@
-import os
 import json
+import os
 from html import escape
+
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QPushButton,
-    QComboBox, QCheckBox, QTextBrowser, QTextEdit, QLineEdit, QFileDialog,
-    QLabel, QFrame, QScrollArea, QStackedWidget, QGridLayout,
+    QApplication, QCheckBox, QComboBox, QFileDialog, QFormLayout, QFrame,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QStackedWidget, QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
-from PyQt6.QtCore import QThread, pyqtSignal, Qt
-from modules.transcriber import FasterWhisperTranscriber
-from modules.diarizer import NeMoDiarizer
+
+from core.models import default_speaker_name
 from core.pipeline import Pipeline
+from modules.diarizer import NeMoDiarizer
+from modules.transcriber import FasterWhisperTranscriber
 
 MODELS = ["tiny", "base", "small", "medium", "large-v3"]
+DIAR_LEVELS = [("easy", "Лёгкая (быстро)"), ("medium", "Средняя"), ("hard", "Тяжёлая (точно)")]
 DEFAULT_MODEL = "small"
-
-DIAR_LEVELS = [
-    ("easy", "Лёгкая (быстро)"),
-    ("medium", "Средняя"),
-    ("hard", "Тяжёлая (точно)"),
-]
 DEFAULT_DIAR_LEVEL = "medium"
 RESULTS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "results")
-SPEAKER_COLORS = [
-    "#4a90d9", "#e08a3c", "#3eaa6e", "#c25a91",
-    "#7d5cb8", "#bfa628", "#3aa1a9", "#c85a4a",
-]
+SPEAKER_COLORS = ["#4a90d9", "#e08a3c", "#3eaa6e", "#c25a91",
+                  "#7d5cb8", "#bfa628", "#3aa1a9", "#c85a4a"]
 CARD_BG = "#ffffff"
 CARD_BORDER = "#dcdcdc"
 TEXT_PRIMARY = "#1a1a1a"
 TEXT_SECONDARY = "#666666"
+
+CARD_STYLE = f"SegmentCard{{background:{CARD_BG};border:1px solid {CARD_BORDER};}}"
+EDIT_STYLE = f"QTextEdit{{background:#ffffff;color:{TEXT_PRIMARY};border:none;}}"
+LINE_STYLE = (f"QLineEdit{{background:#ffffff;color:{TEXT_PRIMARY};"
+              f"border:1px solid {CARD_BORDER};padding:4px 6px;}}")
+BROWSER_STYLE = (f"QTextBrowser{{background:#f5f5f5;color:{TEXT_PRIMARY};"
+                 "border:1px solid #d0d0d0;padding:8px;}}")
+SCROLL_STYLE = "QScrollArea{background:#f5f5f5;border:1px solid #d0d0d0;}"
 
 
 def _cuda_available() -> bool:
@@ -39,12 +43,25 @@ def _cuda_available() -> bool:
         return False
 
 
+def _speaker_color(speaker: str) -> str:
+    try:
+        idx = int(speaker.split("_")[-1])
+    except ValueError:
+        idx = abs(hash(speaker))
+    return SPEAKER_COLORS[idx % len(SPEAKER_COLORS)]
+
+
+def _header_html(label: str, color: str, start: float, end: float) -> str:
+    return (f'<span style="color:{color};font-weight:bold">{escape(label)}</span>'
+            f'<span style="color:{TEXT_SECONDARY};margin-left:8px">[{start:.1f}–{end:.1f}s]</span>')
+
+
 class Worker(QThread):
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
     progress = pyqtSignal(str, str, float)
 
-    def __init__(self, pipeline, path):
+    def __init__(self, pipeline: Pipeline, path: str):
         super().__init__()
         self.pipeline, self.path = pipeline, path
         self.cancelled = False
@@ -62,31 +79,13 @@ class Worker(QThread):
                 self.failed.emit(str(e))
 
 
-def _default_speaker_name(speaker: str) -> str:
-    try:
-        n = int(speaker.split("_")[-1]) + 1
-        return f"Спикер {n}"
-    except ValueError:
-        return speaker
-
-
-def _speaker_color(speaker: str) -> str:
-    try:
-        idx = int(speaker.split("_")[-1])
-    except ValueError:
-        idx = abs(hash(speaker))
-    return SPEAKER_COLORS[idx % len(SPEAKER_COLORS)]
-
-
 class SegmentCard(QFrame):
     def __init__(self, segment: dict):
         super().__init__()
         self.segment = segment
         self.speaker = segment["speaker"]
         self.color = _speaker_color(self.speaker)
-        self.setStyleSheet(
-            f"SegmentCard{{background:{CARD_BG};border:1px solid {CARD_BORDER};}}"
-        )
+        self.setStyleSheet(CARD_STYLE)
 
         stripe = QFrame()
         stripe.setFixedWidth(6)
@@ -97,17 +96,13 @@ class SegmentCard(QFrame):
 
         self.text_edit = QTextEdit()
         self.text_edit.setPlainText(segment.get("text", "").strip())
-        self.text_edit.setStyleSheet(
-            "QTextEdit{background:#ffffff;color:" + TEXT_PRIMARY +
-            ";border:none;}"
-        )
+        self.text_edit.setStyleSheet(EDIT_STYLE)
         self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
         self.text_edit.document().contentsChanged.connect(self._fit_height)
         self.text_edit.document().documentLayout().documentSizeChanged.connect(
-            lambda _: self._fit_height()
-        )
+            lambda _: self._fit_height())
 
         inner = QVBoxLayout()
         inner.setContentsMargins(10, 8, 10, 8)
@@ -121,11 +116,7 @@ class SegmentCard(QFrame):
         row.addLayout(inner, 1)
 
     def set_label(self, label: str):
-        s, e = self.segment["start"], self.segment["end"]
-        self.header.setText(
-            f'<span style="color:{self.color};font-weight:bold">{escape(label)}</span>'
-            f'<span style="color:{TEXT_SECONDARY};margin-left:8px">[{s:.1f}–{e:.1f}s]</span>'
-        )
+        self.header.setText(_header_html(label, self.color, self.segment["start"], self.segment["end"]))
 
     def updated_text(self) -> str:
         return self.text_edit.toPlainText().strip()
@@ -133,8 +124,7 @@ class SegmentCard(QFrame):
     def _fit_height(self):
         doc = self.text_edit.document()
         doc.setTextWidth(self.text_edit.viewport().width())
-        h = int(doc.size().height()) + 8
-        self.text_edit.setFixedHeight(max(28, h))
+        self.text_edit.setFixedHeight(max(28, int(doc.size().height()) + 8))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -147,7 +137,7 @@ class JsonEditor(QScrollArea):
     def __init__(self):
         super().__init__()
         self.setWidgetResizable(True)
-        self.setStyleSheet("QScrollArea{background:#f5f5f5;border:1px solid #d0d0d0;}")
+        self.setStyleSheet(SCROLL_STYLE)
         self._inner = QWidget()
         self._inner.setStyleSheet("background:#f5f5f5;")
         self._layout = QVBoxLayout(self._inner)
@@ -156,7 +146,6 @@ class JsonEditor(QScrollArea):
         self.setWidget(self._inner)
         self.cards: list[SegmentCard] = []
         self.speakers: dict[str, str] = {}
-        self.name_edits: dict[str, QLineEdit] = {}
         self.data: dict = {}
         self.source_path: str = ""
 
@@ -166,12 +155,12 @@ class JsonEditor(QScrollArea):
         self._clear()
 
         segs = data.get("segments", [])
-        stored = data.get("speakers", {}) or {}
+        stored = data.get("speakers") or {}
         order: list[str] = []
         for s in segs:
             if s["speaker"] not in order:
                 order.append(s["speaker"])
-        self.speakers = {spk: stored.get(spk, _default_speaker_name(spk)) for spk in order}
+        self.speakers = {spk: stored.get(spk, default_speaker_name(spk)) for spk in order}
 
         self._layout.addWidget(self._build_names_panel())
         for seg in segs:
@@ -184,25 +173,18 @@ class JsonEditor(QScrollArea):
 
     def _build_names_panel(self) -> QFrame:
         panel = QFrame()
-        panel.setStyleSheet(
-            f"QFrame{{background:{CARD_BG};border:1px solid {CARD_BORDER};}}"
-        )
+        panel.setStyleSheet(f"QFrame{{background:{CARD_BG};border:1px solid {CARD_BORDER};}}")
         grid = QGridLayout(panel)
         grid.setContentsMargins(12, 10, 12, 10)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
         for i, spk in enumerate(self.speakers):
-            color = _speaker_color(spk)
             dot = QLabel()
             dot.setFixedSize(12, 12)
-            dot.setStyleSheet(f"background:{color};border-radius:6px;")
+            dot.setStyleSheet(f"background:{_speaker_color(spk)};border-radius:6px;")
             edit = QLineEdit(self.speakers[spk])
-            edit.setStyleSheet(
-                f"QLineEdit{{background:#ffffff;color:{TEXT_PRIMARY};"
-                f"border:1px solid {CARD_BORDER};padding:4px 6px;}}"
-            )
+            edit.setStyleSheet(LINE_STYLE)
             edit.textChanged.connect(lambda text, s=spk: self._on_name_changed(s, text))
-            self.name_edits[spk] = edit
             grid.addWidget(dot, i, 0)
             grid.addWidget(edit, i, 1)
         grid.setColumnStretch(1, 1)
@@ -210,7 +192,7 @@ class JsonEditor(QScrollArea):
 
     def _on_name_changed(self, speaker: str, name: str):
         self.speakers[speaker] = name
-        label = name.strip() or _default_speaker_name(speaker)
+        label = name.strip() or default_speaker_name(speaker)
         for card in self.cards:
             if card.speaker == speaker:
                 card.set_label(label)
@@ -219,26 +201,19 @@ class JsonEditor(QScrollArea):
     def collect(self) -> dict:
         for card in self.cards:
             card.segment["text"] = card.updated_text()
-        speakers = {
-            spk: (name.strip() or _default_speaker_name(spk))
-            for spk, name in self.speakers.items()
-        }
-        new_data = {"language": self.data.get("language", "ru"), "speakers": speakers}
-        for k, v in self.data.items():
-            if k not in ("language", "speakers", "segments"):
-                new_data[k] = v
-        new_data["segments"] = self.data.get("segments", [])
-        self.data = new_data
+        speakers = {spk: (name.strip() or default_speaker_name(spk))
+                    for spk, name in self.speakers.items()}
+        self.data = {"language": self.data.get("language", "ru"),
+                     "speakers": speakers,
+                     "segments": self.data.get("segments", [])}
         return self.data
 
     def _clear(self):
         while self._layout.count():
-            item = self._layout.takeAt(0)
-            w = item.widget()
+            w = self._layout.takeAt(0).widget()
             if w is not None:
                 w.deleteLater()
         self.cards = []
-        self.name_edits = {}
         self.speakers = {}
 
 
@@ -258,23 +233,17 @@ class SettingsPanel(QFrame):
             self.gpu.setToolTip("CUDA недоступна — torch собран без поддержки GPU")
 
         self.word_ts = QCheckBox("точные таймстампы слов")
-        self.word_ts.setToolTip(
-            "Сильно замедляет транскрипцию (~×2).\n"
-            "Без неё границы между спикерами огрубляются до сегментов (~2-5 сек)."
-        )
+        self.word_ts.setToolTip("Сильно замедляет транскрипцию (~×2).\n"
+                                "Без неё границы между спикерами огрубляются (~2-5 сек).")
 
         self.diar = QComboBox()
         for key, label in DIAR_LEVELS:
             self.diar.addItem(label, userData=key)
         self.diar.setCurrentIndex(
-            next(i for i, (k, _) in enumerate(DIAR_LEVELS) if k == DEFAULT_DIAR_LEVEL)
-        )
-        self.diar.setToolTip(
-            "Сложность диаризации:\n"
-            "Лёгкая — 1 окно titanet, быстро\n"
-            "Средняя — 5 окон, баланс\n"
-            "Тяжёлая — 6 окон с мелким шагом, максимум точности"
-        )
+            next(i for i, (k, _) in enumerate(DIAR_LEVELS) if k == DEFAULT_DIAR_LEVEL))
+        self.diar.setToolTip("Лёгкая — 1 окно, быстро\n"
+                             "Средняя — 5 окон, баланс\n"
+                             "Тяжёлая — 6 окон, максимум точности")
 
         form = QFormLayout(self)
         form.addRow(QLabel("<b>Настройки</b>"))
@@ -290,45 +259,45 @@ class SettingsPanel(QFrame):
 class Window(QWidget):
     def __init__(self):
         super().__init__()
-        self.path = None
+        self.path: str | None = None
         self.transcribers: dict[tuple, FasterWhisperTranscriber] = {}
-        self.diarizers: dict[str, NeMoDiarizer] = {}
-        self.setWindowTitle("")
+        self.diarizers: dict[tuple, NeMoDiarizer] = {}
+        self.progress_lines: list[str] = []
         self.resize(900, 600)
 
         self.pick = QPushButton("Файл…")
-        self.pick.clicked.connect(self._pick)
         self.name = QLabel("—")
         self.toggle = QPushButton("Настройки")
         self.toggle.setCheckable(True)
         self.toggle.setChecked(True)
-        self.toggle.toggled.connect(self._toggle_panel)
         self.run = QPushButton("Обработать")
         self.run.setEnabled(False)
-        self.run.clicked.connect(self._run)
         self.cancel = QPushButton("Отмена")
         self.cancel.setEnabled(False)
-        self.cancel.clicked.connect(self._cancel)
         self.show_btn = QPushButton("Отобразить")
-        self.show_btn.clicked.connect(self._show_json)
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setEnabled(False)
+
+        self.pick.clicked.connect(self._pick)
+        self.toggle.toggled.connect(lambda c: self.settings.setVisible(c))
+        self.run.clicked.connect(self._run)
+        self.cancel.clicked.connect(self._cancel)
+        self.show_btn.clicked.connect(self._show_json)
         self.save_btn.clicked.connect(self._save_edits)
 
         top = QHBoxLayout()
-        for w in (self.pick, self.name, self.toggle, self.run, self.cancel,
-                  self.show_btn, self.save_btn):
+        for w in (self.pick, self.name, self.toggle, self.run,
+                  self.cancel, self.show_btn, self.save_btn):
             top.addWidget(w)
         top.setStretch(1, 1)
 
         self.out = QTextBrowser()
         self.out.setOpenExternalLinks(False)
-        self.out.setStyleSheet(
-            "QTextBrowser{background:#f5f5f5;color:" + TEXT_PRIMARY +
-            ";border:1px solid #d0d0d0;padding:8px;}"
-        )
+        self.out.setStyleSheet(BROWSER_STYLE)
+
         self.editor = JsonEditor()
         self.editor.edited.connect(self._on_edited)
+
         self.viewport = QStackedWidget()
         self.viewport.addWidget(self.out)
         self.viewport.addWidget(self.editor)
@@ -342,13 +311,9 @@ class Window(QWidget):
         layout.addLayout(top)
         layout.addLayout(body)
 
-    def _toggle_panel(self, checked: bool):
-        self.settings.setVisible(checked)
-
     def _pick(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Аудиофайл", "", "Audio (*.wav *.mp3 *.m4a *.ogg *.flac)"
-        )
+            self, "Аудиофайл", "", "Audio (*.wav *.mp3 *.m4a *.ogg *.flac)")
         if path:
             self.path = path
             self.name.setText(path.rsplit("/", 1)[-1])
@@ -358,26 +323,25 @@ class Window(QWidget):
         device = "cuda" if self.settings.gpu.isChecked() else "cpu"
         name = self.settings.model.currentText()
         word_ts = self.settings.word_ts.isChecked()
-        diar_level = self.settings.diar_level()
+        level = self.settings.diar_level()
         key = (name, device, word_ts)
         if key not in self.transcribers:
             self.out.setPlainText(f"Загрузка {name} ({device})…")
             QApplication.processEvents()
             self.transcribers[key] = FasterWhisperTranscriber(name, device, word_ts)
-        diar_key = (device, diar_level)
+        diar_key = (device, level)
         if diar_key not in self.diarizers:
-            self.diarizers[diar_key] = NeMoDiarizer(device, diar_level)
+            self.diarizers[diar_key] = NeMoDiarizer(device, level)
         return Pipeline(self.transcribers[key], self.diarizers[diar_key])
 
     def _run(self):
         self.run.setEnabled(False)
         self.cancel.setEnabled(True)
         self.save_btn.setEnabled(False)
-        pipeline = self._pipeline()
-        self.progress_lines: list[str] = []
+        self.progress_lines = []
         self.out.setPlainText("")
         self.viewport.setCurrentWidget(self.out)
-        self.worker = Worker(pipeline, self.path)
+        self.worker = Worker(self._pipeline(), self.path)
         self.worker.progress.connect(self._on_progress)
         self.worker.done.connect(self._done)
         self.worker.failed.connect(self._failed)
@@ -403,65 +367,52 @@ class Window(QWidget):
         self.cancel.setEnabled(False)
         self.run.setEnabled(True)
 
-    def _failed(self, msg):
+    def _failed(self, msg: str):
         self.out.setPlainText(f"Ошибка: {msg}")
         self.cancel.setEnabled(False)
         self.run.setEnabled(True)
 
-    def _save_json(self, result) -> str:
+    def _save_json(self, result):
         os.makedirs(RESULTS_DIR, exist_ok=True)
         base = os.path.splitext(os.path.basename(self.path))[0]
-        out_path = os.path.join(RESULTS_DIR, f"{base}.json")
-        with open(out_path, "w") as f:
+        with open(os.path.join(RESULTS_DIR, f"{base}.json"), "w") as f:
             json.dump(result.to_dict(), f, ensure_ascii=False, indent=2)
-        return out_path
 
     def _render_progress(self) -> str:
         items = "".join(f"<div>{escape(line)}</div>" for line in self.progress_lines)
-        return (
-            f'<div style="color:{TEXT_SECONDARY};font-family:monospace;'
-            f'margin-bottom:12px">{items}</div>'
-        )
+        return (f'<div style="color:{TEXT_SECONDARY};font-family:monospace;'
+                f'margin-bottom:12px">{items}</div>')
 
     def _render_segments(self, result) -> str:
         if hasattr(result, "segments"):
-            segs = [
-                {"start": s.start, "end": s.end, "speaker": s.speaker, "text": s.text}
-                for s in result.segments
-            ]
+            segs = [{"start": s.start, "end": s.end, "speaker": s.speaker, "text": s.text}
+                    for s in result.segments]
             names = getattr(result, "speakers", {}) or {}
         else:
             segs = result.get("segments", [])
-            names = result.get("speakers", {}) or {}
+            names = result.get("speakers") or {}
 
         rows = []
         for seg in segs:
             spk = seg["speaker"]
             color = _speaker_color(spk)
-            label = names.get(spk) or _default_speaker_name(spk)
+            label = names.get(spk) or default_speaker_name(spk)
             time = f"{seg['start']:.1f}–{seg['end']:.1f}s"
             rows.append(
                 f'<table cellspacing="0" cellpadding="0" width="100%" '
                 f'style="margin:8px 0;background:{CARD_BG};border:1px solid {CARD_BORDER}">'
-                f'<tr>'
-                f'<td width="6" style="background:{color}"></td>'
+                f'<tr><td width="6" style="background:{color}"></td>'
                 f'<td style="padding:10px 14px;color:{TEXT_PRIMARY}">'
                 f'<div style="margin-bottom:4px">'
                 f'<span style="color:{color};font-weight:bold">{escape(label)}</span>'
-                f'<span style="color:{TEXT_SECONDARY};margin-left:8px">[{time}]</span>'
-                f'</div>'
+                f'<span style="color:{TEXT_SECONDARY};margin-left:8px">[{time}]</span></div>'
                 f'<div style="color:{TEXT_PRIMARY};line-height:1.5">{escape(seg["text"].strip())}</div>'
-                f'</td>'
-                f'</tr>'
-                f'</table>'
-            )
+                f'</td></tr></table>')
         return "".join(rows)
 
     def _show_json(self):
         start_dir = RESULTS_DIR if os.path.isdir(RESULTS_DIR) else ""
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Открыть JSON", start_dir, "JSON (*.json)"
-        )
+        path, _ = QFileDialog.getOpenFileName(self, "Открыть JSON", start_dir, "JSON (*.json)")
         if not path:
             return
         try:
@@ -478,10 +429,9 @@ class Window(QWidget):
     def _save_edits(self):
         if not self.editor.source_path:
             return
-        data = self.editor.collect()
         try:
             with open(self.editor.source_path, "w") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                json.dump(self.editor.collect(), f, ensure_ascii=False, indent=2)
             self.save_btn.setText("Сохранено")
             self.save_btn.setEnabled(False)
         except Exception as e:
