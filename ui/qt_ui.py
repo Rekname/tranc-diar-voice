@@ -230,7 +230,7 @@ class SettingsPanel(QFrame):
         self.gpu = QCheckBox("включить")
         if not _cuda_available():
             self.gpu.setEnabled(False)
-            self.gpu.setToolTip("CUDA недоступна — torch собран без поддержки GPU")
+            self.gpu.setToolTip("CUDA недоступна — нет GPU NVIDIA или не установлены драйверы")
 
         self.word_ts = QCheckBox("точные таймстампы слов")
         self.word_ts.setToolTip("Сильно замедляет транскрипцию (~×2).\n"
