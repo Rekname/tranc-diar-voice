@@ -72,9 +72,6 @@ real/*
 scripts/
 img/
 docs/
-datasets/
-results/
-models/
 
 kaggle_token
 hf_token
