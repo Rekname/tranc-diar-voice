@@ -31,7 +31,7 @@ EDIT_STYLE = f"QTextEdit{{background:#ffffff;color:{TEXT_PRIMARY};border:none;}}
 LINE_STYLE = (f"QLineEdit{{background:#ffffff;color:{TEXT_PRIMARY};"
               f"border:1px solid {CARD_BORDER};padding:4px 6px;}}")
 BROWSER_STYLE = (f"QTextBrowser{{background:#f5f5f5;color:{TEXT_PRIMARY};"
-                 "border:1px solid #d0d0d0;padding:8px;}}")
+                 "border:1px solid #d0d0d0;padding:8px;}")
 SCROLL_STYLE = "QScrollArea{background:#f5f5f5;border:1px solid #d0d0d0;}"
 
 
